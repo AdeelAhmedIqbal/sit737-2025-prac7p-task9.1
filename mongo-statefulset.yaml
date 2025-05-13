@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mongo
+  namespace: default
+spec:
+  serviceName: mongo
+  replicas: 3
+  selector:
+    matchLabels:
+      app: mongo
+  template:
+    metadata:
+      labels:
+        app: mongo
+    spec:
+      # Mount the keyFile secret as /etc/mongo/keyfile (mode 0400, owner root)
+      volumes:
+        - name: keyfile-vol
+          secret:
+            secretName: mongo-keyfile-secret
+            defaultMode: 256    # decimal for 0400
+
+      containers:
+      - name: mongo
+        image: mongo:4.4
+        # Override entrypoint so mongod runs as root (can read keyFile)
+        command: ["mongod"]
+        args:
+          - "--replSet=rs0" # --replSet=rs0 sets the replica set name to "rs0" for all members
+          - "--bind_ip_all" # --bind_ip_all makes MongoDB listen on all network interfaces (required for intra-cluster connectivity)
+          - "--auth"
+          - "--keyFile=/etc/mongo/keyfile"
+        ports:
+          - name: mongo
+            containerPort: 27017
+        env:
+          - name: MONGO_INITDB_ROOT_USERNAME
+            valueFrom:
+              secretKeyRef:
+                name: mongo-root-secret
+                key: MONGO_INITDB_ROOT_USERNAME
+          - name: MONGO_INITDB_ROOT_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: mongo-root-secret
+                key: MONGO_INITDB_ROOT_PASSWORD
+        volumeMounts:
+          # Mount the persistent volume to MongoDB’s data directory
+          - name: mongo-data
+            mountPath: /data/db
+          # the keyFile at /etc/mongo/keyfile
+          - name: keyfile-vol
+            mountPath: /etc/mongo
+            readOnly: true
+
+  volumeClaimTemplates:
+  - metadata:
+      name: mongo-data
+    spec:
+      storageClassName: local-hostpath
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 3Gi
